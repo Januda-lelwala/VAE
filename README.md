@@ -56,6 +56,34 @@ MNIST is downloaded to `data/`. Each epoch writes:
 
 On Apple Silicon this uses MPS automatically.
 
+## Train on Modal (GPU)
+
+Same training loop, run on a cloud GPU. Checkpoints and figures land in a Volume named `vae-mnist` and are copied into local `checkpoints/` and `outputs/` when the job finishes.
+
+```bash
+uv pip install modal
+modal setup
+modal run modal_train.py
+modal run modal_train.py --arch mlp --latent-dim 20 --epochs 20
+modal run modal_train.py --latent-dim 2 --epochs 30 --kl-warmup-epochs 5 --gpu L4
+```
+
+GPU jobs need a payment method on the Modal account. Default GPU is a T4; pass `--gpu L4` / `--gpu A10` / `--gpu A100` to pick another. `modal run --detach modal_train.py` keeps the job running if your laptop disconnects.
+
+Pull artifacts from a previous run without training again:
+
+```bash
+modal run modal_train.py --download-only
+```
+
+Or with the Volume CLI:
+
+```bash
+modal volume ls vae-mnist
+modal volume get vae-mnist /checkpoints ./checkpoints
+modal volume get vae-mnist /outputs ./outputs
+```
+
 ## Generate
 
 ```bash
@@ -64,8 +92,19 @@ python generate.py --checkpoint checkpoints/vae_final.pt
 
 Writes `outputs/reconstructions.png`, `outputs/samples.png`, and `outputs/interpolations.png`. If the checkpoint was trained with `--latent-dim 2`, also writes a decoded manifold and a scatter of posterior means colored by digit.
 
+## Latent playground
+
+An interactive page for dragging each latent mean `μ` and std `σ`, then decoding `p(x|z)`. Load a MNIST test digit to fill `q(z|x)`, switch between the posterior mean `z = μ` and a reparameterized sample `z = μ + σ·ε`, morph between digits, or sweep one coordinate while holding the rest fixed.
+
+```bash
+python app.py
+```
+
+Then open http://127.0.0.1:8000. Optional flags: `--checkpoint`, `--port`, `--host`.
+
 ## Tests
 
 ```bash
 python test_model.py
+python test_app.py
 ```

@@ -7,6 +7,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
@@ -26,6 +29,24 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--n-samples", type=int, default=64)
     p.add_argument("--n-interp", type=int, default=10)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument(
+        "--index",
+        type=int,
+        default=None,
+        help="MNIST test-set index to reconstruct (0..9999)",
+    )
+    p.add_argument(
+        "--digit",
+        type=int,
+        default=None,
+        help="Use the first MNIST test image with this label (0..9)",
+    )
+    p.add_argument(
+        "--catalog",
+        action="store_true",
+        help="Write a numbered grid of test images so you can pick --index",
+    )
+    p.add_argument("--catalog-n", type=int, default=40, help="How many catalog images to show")
     return p.parse_args()
 
 
@@ -53,6 +74,55 @@ def latent_manifold(model: VAE, n: int = 20, bound: float = 3.0) -> torch.Tensor
     ys, xs = torch.meshgrid(grid, grid, indexing="ij")
     z = torch.stack([xs.reshape(-1), ys.reshape(-1)], dim=1)
     return torch.sigmoid(model.decode(z))
+
+
+def find_digit_index(dataset: datasets.MNIST, digit: int) -> int:
+    targets = dataset.targets
+    hits = (targets == digit).nonzero(as_tuple=False)
+    if hits.numel() == 0:
+        raise SystemExit(f"no MNIST test image with digit {digit}")
+    return int(hits[0].item())
+
+
+def save_catalog(dataset: datasets.MNIST, path: Path, n: int = 40, ncol: int = 8) -> None:
+    n = min(n, len(dataset))
+    nrow = (n + ncol - 1) // ncol
+    fig, axes = plt.subplots(nrow, ncol, figsize=(ncol * 1.35, nrow * 1.55))
+    axes_flat = axes.ravel() if n else []
+    for i in range(n):
+        img, label = dataset[i]
+        axes_flat[i].imshow(img.squeeze().numpy(), cmap="gray", vmin=0, vmax=1)
+        axes_flat[i].set_title(f"{i}: {int(label)}", fontsize=8)
+        axes_flat[i].axis("off")
+    for i in range(n, len(axes_flat)):
+        axes_flat[i].axis("off")
+    fig.suptitle("MNIST test set (index: digit) — pass --index N to reconstruct one")
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+
+
+@torch.no_grad()
+def save_original_vs_recon(
+    original: torch.Tensor,
+    recon: torch.Tensor,
+    path: Path,
+    title: str,
+) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(4.8, 2.6))
+    for ax, img, name in (
+        (axes[0], original, "original"),
+        (axes[1], recon, "VAE output"),
+    ):
+        ax.imshow(img.detach().cpu().squeeze().numpy(), cmap="gray", vmin=0, vmax=1)
+        ax.set_title(name)
+        ax.axis("off")
+    fig.suptitle(title, fontsize=10)
+    fig.tight_layout()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
 
 
 @torch.no_grad()
@@ -92,6 +162,38 @@ def main() -> None:
 
     model = load_model(args.checkpoint, device)
     test_set = datasets.MNIST(DATA_DIR, train=False, download=True, transform=transforms.ToTensor())
+
+    if args.catalog:
+        catalog_path = OUT_DIR / "sample_catalog.png"
+        save_catalog(test_set, catalog_path, n=args.catalog_n)
+        print(f"wrote {catalog_path}")
+
+    if args.index is not None or args.digit is not None:
+        if args.digit is not None and not 0 <= args.digit <= 9:
+            raise SystemExit("--digit must be an integer 0..9")
+        if args.index is not None:
+            index = args.index
+            if not 0 <= index < len(test_set):
+                raise SystemExit(f"--index must be in 0..{len(test_set) - 1}")
+        else:
+            index = find_digit_index(test_set, args.digit)
+        img, label = test_set[index]
+        x = img.unsqueeze(0).to(device)
+        recon = model.reconstruct(x)
+        out_path = OUT_DIR / f"sample_{index:05d}_digit_{int(label)}.png"
+        save_original_vs_recon(
+            x,
+            recon,
+            out_path,
+            title=f"test index {index}  (digit {int(label)})",
+        )
+        print(f"selected test index {index} (digit {int(label)})")
+        print(f"wrote {out_path}")
+        return
+
+    if args.catalog:
+        return
+
     loader = DataLoader(test_set, batch_size=128, shuffle=False)
 
     vis_x, _ = next(iter(DataLoader(test_set, batch_size=64, shuffle=False)))

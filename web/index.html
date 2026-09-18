@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VAE Latent Playground</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Latent Playground</h1>
+        <p class="sub">
+          Set the mean <span class="sym">μ</span> and std
+          <span class="sym">σ</span> of <span class="sym">q(z)</span>, then
+          decode <span class="sym">p(x|z)</span>.
+        </p>
+      </div>
+      <div class="meta" id="meta">loading…</div>
+    </header>
+
+    <main>
+      <section class="stage">
+        <div class="canvases">
+          <figure id="orig-wrap" hidden>
+            <canvas id="original" width="28" height="28"></canvas>
+            <figcaption>original</figcaption>
+          </figure>
+          <figure>
+            <canvas id="output" width="28" height="28"></canvas>
+            <figcaption id="out-caption">p(x|z)</figcaption>
+          </figure>
+        </div>
+
+        <p class="stats" id="stats">KL — · z = μ</p>
+
+        <div class="mode">
+          <label>
+            <input type="radio" name="mode" value="mean" checked />
+            decode mean z = μ
+          </label>
+          <label>
+            <input type="radio" name="mode" value="sample" />
+            sample z = μ + σ·ε
+          </label>
+        </div>
+
+        <div class="actions">
+          <button type="button" id="btn-prior">Sample prior</button>
+          <button type="button" id="btn-reset">Reset μ=0, σ=1</button>
+          <button type="button" id="btn-eps">Resample ε</button>
+          <button type="button" id="btn-nudge">Nudge μ</button>
+          <button type="button" id="btn-random">Random MNIST</button>
+        </div>
+
+        <div class="digits" id="digits"></div>
+
+        <label class="morph">
+          Morph to
+          <select id="morph-digit">
+            <option value="">—</option>
+          </select>
+          <input type="range" id="morph-t" min="0" max="1" step="0.01" value="0" disabled />
+          <span id="morph-t-val">0.00</span>
+        </label>
+
+        <div>
+          <div class="strip-head">
+            <span>MNIST test images — click to encode</span>
+            <button type="button" class="linkish" id="btn-more">more</button>
+          </div>
+          <div class="filmstrip" id="filmstrip"></div>
+        </div>
+
+        <div>
+          <div class="strip-head">
+            <span>Draws from current q(z)</span>
+            <button type="button" class="linkish" id="btn-redraw">redraw</button>
+          </div>
+          <div class="sample-grid" id="sample-grid"></div>
+        </div>
+      </section>
+
+      <section class="latents">
+        <div class="latents-head">
+          <h2>Latent coordinates</h2>
+          <p>
+            Variance is σ². Click a dimension index to reset it, or sweep to
+            walk that μ while holding the rest fixed.
+          </p>
+        </div>
+        <div class="row head">
+          <span></span>
+          <span>μ</span>
+          <span></span>
+          <span></span>
+          <span>σ</span>
+          <span></span>
+          <span>σ²</span>
+          <span></span>
+          <span></span>
+        </div>
+        <div id="rows"></div>
+      </section>
+    </main>
+
+    <p class="hint">
+      Keys: 0–9 load that digit · R random image · P prior sample · E resample ε
+    </p>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

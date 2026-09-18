@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import DataLoader
@@ -37,6 +41,9 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--num-workers", type=int, default=0)
+    p.add_argument("--data-dir", type=Path, default=DATA_DIR)
+    p.add_argument("--ckpt-dir", type=Path, default=CKPT_DIR)
+    p.add_argument("--out-dir", type=Path, default=OUT_DIR)
     return p.parse_args()
 
 
@@ -77,21 +84,25 @@ def eval_epoch(model: VAE, loader: DataLoader, device: torch.device, beta: float
     return {k: v / n for k, v in totals.items()}
 
 
-def main() -> None:
-    args = parse_args()
+def train(args: argparse.Namespace) -> Path:
     seed_everything(args.seed)
     device = get_device()
-    CKPT_DIR.mkdir(parents=True, exist_ok=True)
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    data_dir = Path(args.data_dir)
+    ckpt_dir = Path(args.ckpt_dir)
+    out_dir = Path(args.out_dir)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     transform = transforms.ToTensor()
-    train_set = datasets.MNIST(DATA_DIR, train=True, download=True, transform=transform)
-    test_set = datasets.MNIST(DATA_DIR, train=False, download=True, transform=transform)
+    train_set = datasets.MNIST(data_dir, train=True, download=True, transform=transform)
+    test_set = datasets.MNIST(data_dir, train=False, download=True, transform=transform)
+    pin = device.type == "cuda"
     train_loader = DataLoader(
         train_set,
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
+        pin_memory=pin,
         drop_last=True,
     )
     test_loader = DataLoader(
@@ -99,6 +110,7 @@ def main() -> None:
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
+        pin_memory=pin,
     )
 
     model = VAE(latent_dim=args.latent_dim, arch=args.arch).to(device)
@@ -125,7 +137,12 @@ def main() -> None:
         beta = beta_at_epoch(epoch, args.beta, args.kl_warmup_epochs)
         running = {"loss": 0.0, "recon": 0.0, "kl": 0.0}
         seen = 0
-        bar = tqdm(train_loader, desc=f"epoch {epoch}/{args.epochs}", leave=False)
+        bar = tqdm(
+            train_loader,
+            desc=f"epoch {epoch}/{args.epochs}",
+            leave=False,
+            disable=not sys.stderr.isatty(),
+        )
         for x, _ in bar:
             x = x.to(device)
             out = model(x)
@@ -164,25 +181,31 @@ def main() -> None:
         model.eval()
         recon = model.reconstruct(vis_x)
         comparison = torch.cat([vis_x, recon], dim=0)
-        save_grid(comparison, OUT_DIR / f"recon_epoch_{epoch:03d}.png", nrow=8)
-        save_grid(model.sample(64, device=device), OUT_DIR / f"samples_epoch_{epoch:03d}.png", nrow=8)
+        save_grid(comparison, out_dir / f"recon_epoch_{epoch:03d}.png", nrow=8)
+        save_grid(model.sample(64, device=device), out_dir / f"samples_epoch_{epoch:03d}.png", nrow=8)
 
         ckpt = {
             "model": model.state_dict(),
             "epoch": epoch,
             "arch": args.arch,
             "latent_dim": args.latent_dim,
-            "args": vars(args),
+            "args": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
             "history": history,
         }
-        torch.save(ckpt, CKPT_DIR / "vae_latest.pt")
+        torch.save(ckpt, ckpt_dir / "vae_latest.pt")
         if epoch == args.epochs:
-            torch.save(ckpt, CKPT_DIR / "vae_final.pt")
+            torch.save(ckpt, ckpt_dir / "vae_final.pt")
 
-    (OUT_DIR / "history.json").write_text(json.dumps(history, indent=2))
-    plot_history(history, OUT_DIR / "loss_curve.png")
-    print(f"saved checkpoint to {CKPT_DIR / 'vae_final.pt'}")
-    print(f"wrote figures under {OUT_DIR}")
+    (out_dir / "history.json").write_text(json.dumps(history, indent=2))
+    plot_history(history, out_dir / "loss_curve.png")
+    final_ckpt = ckpt_dir / "vae_final.pt"
+    print(f"saved checkpoint to {final_ckpt}")
+    print(f"wrote figures under {out_dir}")
+    return final_ckpt
+
+
+def main() -> None:
+    train(parse_args())
 
 
 if __name__ == "__main__":
